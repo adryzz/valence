@@ -22,6 +22,7 @@ mod connect;
 mod legacy_ping;
 mod packet_io;
 pub mod tokio_runtime;
+#[cfg(feature = "monoio")]
 pub mod monoio_runtime;
 
 use std::borrow::Cow;
@@ -83,6 +84,7 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
                     handle: t.handle.clone()
             })
             },
+            #[cfg(feature = "monoio")]
             Some(RuntimeOptions::Monoio(_)) => {
                 todo!()
             },
@@ -125,6 +127,7 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
                 tokio_runtime::start_accept_loop(shared.clone())
             }
         }
+        #[cfg(feature = "monoio")]
         RuntimeState::Monoio(_) => {
             move |shared: Res<SharedNetworkState>| {
                 monoio_runtime::start_accept_loop(shared.clone())
@@ -138,6 +141,7 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
                 tokio_runtime::start_broadcast_to_lan_loop(shared.clone())
             }
         }
+        #[cfg(feature = "monoio")]
         RuntimeState::Monoio(_) => {
             move |shared: Res<SharedNetworkState>| {
                 monoio_runtime::start_broadcast_to_lan_loop(shared.clone())
@@ -519,11 +523,13 @@ pub trait NetworkCallbacks: Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub enum RuntimeOptions {
     Tokio(tokio_runtime::RuntimeOptions),
+    #[cfg(feature = "monoio")]
     Monoio(monoio_runtime::RuntimeOptions)
 }
 
 enum RuntimeState {
     Tokio(tokio_runtime::RuntimeState),
+    #[cfg(feature = "monoio")]
     Monoio(monoio_runtime::RuntimeState)
 }
 

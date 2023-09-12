@@ -36,6 +36,7 @@ scoreboard = ["dep:valence_scoreboard"]
 world_border = ["dep:valence_world_border"]
 weather = ["dep:valence_weather"]
 testing = []
+monoio = ["valence_network/monoio"]
 
 [dependencies]
 anyhow.workspace = true
