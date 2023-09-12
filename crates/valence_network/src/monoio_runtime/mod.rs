@@ -1,35 +1,32 @@
 use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
-use monoio::net::{TcpListener, TcpStream, udp::UdpSocket};
+
+use monoio::net::udp::UdpSocket;
+use monoio::net::{TcpListener, TcpStream};
 use tracing::{error, trace, warn};
 use valence_server::protocol::{PacketDecoder, PacketEncoder};
 
 use crate::legacy_ping::try_handle_legacy_ping;
 use crate::packet_io::PacketIo;
-
-use crate::{SharedNetworkState, BroadcastToLan};
+use crate::{BroadcastToLan, SharedNetworkState};
 
 #[derive(Debug, Clone)]
-pub struct RuntimeOptions {
-    
-}
+pub struct RuntimeOptions {}
 
-pub(crate) struct RuntimeState {
-
-}
+pub(crate) struct RuntimeState {}
 
 pub(crate) fn start_accept_loop(shared: SharedNetworkState) {
     match &shared.0.runtime_state {
         crate::RuntimeState::Monoio(s) => todo!(),
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
 pub(crate) fn start_broadcast_to_lan_loop(shared: SharedNetworkState) {
     match &shared.0.runtime_state {
-        crate::RuntimeState::Tokio(s) => todo!(),
-        _ => panic!()
+        crate::RuntimeState::Monoio(s) => todo!(),
+        _ => panic!(),
     }
 }
 
@@ -127,7 +124,11 @@ async fn do_broadcast_to_lan_loop(shared: SharedNetworkState) {
 
         let message = format!("[MOTD]{motd}[/MOTD][AD]{port}[/AD]");
 
-        if let Err(e) = socket.send_to(message.as_bytes(), "224.0.2.60:4445".parse().unwrap()).await.0 {
+        if let Err(e) = socket
+            .send_to(message.as_bytes(), "224.0.2.60:4445".parse().unwrap())
+            .await
+            .0
+        {
             tracing::warn!("Failed to send broadcast to LAN packet: {}", e);
         }
 

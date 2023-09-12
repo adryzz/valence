@@ -31,10 +31,9 @@ use valence_server::protocol::packets::status::{
 use valence_server::protocol::{RawBytes, VarInt};
 use valence_server::text::{Color, IntoText};
 use valence_server::{ident, Text, MINECRAFT_VERSION, PROTOCOL_VERSION};
+
 use crate::packet_io::PacketIo;
 use crate::{CleanupOnDrop, ConnectionMode, NewClientInfo, ServerListPing, SharedNetworkState};
-
-
 
 /// Basic information about a client, provided at the beginning of the
 /// connection

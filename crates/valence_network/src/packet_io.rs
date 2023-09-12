@@ -5,10 +5,17 @@ use std::{io, mem};
 
 use anyhow::bail;
 use bytes::BytesMut;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::sync::Semaphore;
-use tokio::task::JoinHandle;
+#[cfg(not(feature = "monoio"))]
+use tokio as runtime;
+
+#[cfg(feature = "monoio")]
+use {monoio as runtime, monoio::io::Splitable};
+
+use runtime::{net::TcpStream, task::JoinHandle};
+use tokio::{sync::Notify, sync::Semaphore};
+
 use tracing::{debug, warn};
 use valence_protocol::CompressionThreshold;
 use valence_server::client::{ClientBundleArgs, ClientConnection, ReceivedPacket};
@@ -101,7 +108,7 @@ impl PacketIo {
 
         let (mut reader, mut writer) = self.stream.into_split();
 
-        let reader_task = tokio::spawn(async move {
+        let reader_task = runtime::spawn(async move {
             let mut buf = BytesMut::new();
 
             loop {
@@ -170,7 +177,7 @@ impl PacketIo {
 
         let (outgoing_sender, mut outgoing_receiver) = byte_channel(outgoing_byte_limit);
 
-        let writer_task = tokio::spawn(async move {
+        let writer_task = runtime::spawn(async move {
             loop {
                 let bytes = match outgoing_receiver.recv_async().await {
                     Ok(bytes) => bytes,

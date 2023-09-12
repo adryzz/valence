@@ -1,16 +1,16 @@
 //! Handles new connections to the server and the log-in process.
-use tokio::runtime::{Runtime, Handle};
 use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
+
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
+use tokio::runtime::{Handle, Runtime};
 use tracing::{error, trace, warn};
 use valence_server::protocol::{PacketDecoder, PacketEncoder};
 
 use crate::legacy_ping::try_handle_legacy_ping;
 use crate::packet_io::PacketIo;
-
-use crate::{SharedNetworkState, BroadcastToLan};
+use crate::{BroadcastToLan, SharedNetworkState};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeOptions {
@@ -20,7 +20,7 @@ pub struct RuntimeOptions {
     /// # Default Value
     ///
     /// `None`
-    pub handle: Handle
+    pub handle: Handle,
 }
 
 pub(crate) struct RuntimeState {
@@ -33,26 +33,24 @@ pub(crate) struct RuntimeState {
 pub(crate) fn start_accept_loop(shared: SharedNetworkState) {
     match &shared.0.runtime_state {
         crate::RuntimeState::Tokio(s) => {
-                let _guard = s.handle.enter();
-        
-                // Start accepting new connections.
-                tokio::spawn(do_accept_loop(shared.clone()));
+            let _guard = s.handle.enter();
 
+            // Start accepting new connections.
+            tokio::spawn(do_accept_loop(shared.clone()));
         }
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
 pub(crate) fn start_broadcast_to_lan_loop(shared: SharedNetworkState) {
     match &shared.0.runtime_state {
         crate::RuntimeState::Tokio(s) => {
-                let _guard = s.handle.enter();
-        
-                // Start accepting new connections.
-                tokio::spawn(do_broadcast_to_lan_loop(shared.clone()));
+            let _guard = s.handle.enter();
 
+            // Start accepting new connections.
+            tokio::spawn(do_broadcast_to_lan_loop(shared.clone()));
         }
-        _ => panic!()
+        _ => panic!(),
     }
 }
 

@@ -2,9 +2,19 @@ use std::io;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::time::sleep;
+#[cfg(not(feature = "monoio"))]
+use {
+    tokio::io::{AsyncReadExt, AsyncWriteExt},
+    tokio::net::TcpStream,
+    tokio::time::sleep,
+};
+#[cfg(feature = "monoio")]
+use {
+    monoio::net::TcpStream,
+    monoio::time::sleep,
+};
+
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 
 use crate::{ServerListLegacyPing, SharedNetworkState};
 

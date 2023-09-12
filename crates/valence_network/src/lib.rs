@@ -20,15 +20,19 @@
 mod byte_channel;
 mod connect;
 mod legacy_ping;
-mod packet_io;
-pub mod tokio_runtime;
 #[cfg(feature = "monoio")]
 pub mod monoio_runtime;
+mod packet_io;
+#[cfg(not(feature = "monoio"))]
+pub mod tokio_runtime;
+
+use tokio::{runtime::Runtime, sync::Semaphore};
 
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
 use anyhow::Context;
 pub use async_trait::async_trait;
 use bevy_app::prelude::*;
@@ -40,8 +44,6 @@ use rand::rngs::OsRng;
 use rsa::traits::PublicKeyParts;
 use rsa::RsaPrivateKey;
 use serde::Serialize;
-use tokio::runtime::Runtime;
-use tokio::sync::Semaphore;
 use tracing::error;
 use uuid::Uuid;
 use valence_protocol::text::IntoText;
@@ -77,26 +79,31 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
         rsa_der::public_key_to_der(&rsa_key.n().to_bytes_be(), &rsa_key.e().to_bytes_be())
             .into_boxed_slice();
 
-        let runtime_state = match &settings.runtime_options {
-            Some(RuntimeOptions::Tokio(t)) => {
-                RuntimeState::Tokio(tokio_runtime::RuntimeState {
-                    runtime: None,
-                    handle: t.handle.clone()
+    let runtime_state = match &settings.runtime_options {
+        #[cfg(not(feature = "monoio"))]
+        Some(RuntimeOptions::Tokio(t)) => RuntimeState::Tokio(tokio_runtime::RuntimeState {
+            runtime: None,
+            handle: t.handle.clone(),
+        }),
+        #[cfg(not(feature = "monoio"))]
+        // have tokio as the default runtime
+        None => {
+            let runtime = Runtime::new()?;
+            
+            RuntimeState::Tokio(tokio_runtime::RuntimeState {
+                handle: runtime.handle().clone(),
+                runtime: Some(runtime),
             })
-            },
-            #[cfg(feature = "monoio")]
-            Some(RuntimeOptions::Monoio(_)) => {
-                todo!()
-            },
-            // have tokio as the default runtime
-            None => {
-                let runtime = Runtime::new()?;
-                RuntimeState::Tokio(tokio_runtime::RuntimeState {
-                    handle: runtime.handle().clone(),
-                    runtime: Some(runtime),
-                })
-            },
-        };
+        }
+        #[cfg(feature = "monoio")]
+        Some(RuntimeOptions::Monoio(_)) => {
+            todo!()
+        }
+        #[cfg(feature = "monoio")]
+        None => {
+            todo!()
+        }
+    };
 
     let shared = SharedNetworkState(Arc::new(SharedNetworkStateInner {
         callbacks: settings.callbacks.clone(),
@@ -122,33 +129,27 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
 
     // System for starting the accept loop.
     let start_accept_loop = match shared.0.runtime_state {
+        #[cfg(not(feature = "monoio"))]
         RuntimeState::Tokio(_) => {
-            move |shared: Res<SharedNetworkState>| {
-                tokio_runtime::start_accept_loop(shared.clone())
-            }
+            move |shared: Res<SharedNetworkState>| tokio_runtime::start_accept_loop(shared.clone())
         }
         #[cfg(feature = "monoio")]
         RuntimeState::Monoio(_) => {
-            move |shared: Res<SharedNetworkState>| {
-                monoio_runtime::start_accept_loop(shared.clone())
-            }
+            move |shared: Res<SharedNetworkState>| monoio_runtime::start_accept_loop(shared.clone())
         }
     };
 
     let start_broadcast_to_lan_loop = match shared.0.runtime_state {
-        RuntimeState::Tokio(_) => {
-            move |shared: Res<SharedNetworkState>| {
-                tokio_runtime::start_broadcast_to_lan_loop(shared.clone())
-            }
-        }
+        #[cfg(not(feature = "monoio"))]
+        RuntimeState::Tokio(_) => move |shared: Res<SharedNetworkState>| {
+            tokio_runtime::start_broadcast_to_lan_loop(shared.clone())
+        },
         #[cfg(feature = "monoio")]
-        RuntimeState::Monoio(_) => {
-            move |shared: Res<SharedNetworkState>| {
-                monoio_runtime::start_broadcast_to_lan_loop(shared.clone())
-            }
-        }
+        RuntimeState::Monoio(_) => move |shared: Res<SharedNetworkState>| {
+            monoio_runtime::start_broadcast_to_lan_loop(shared.clone())
+        },
     };
-    
+
     // System for spawning new clients.
     let spawn_new_clients = move |world: &mut World| {
         for _ in 0..shared.0.new_clients_recv.len() {
@@ -522,15 +523,17 @@ pub trait NetworkCallbacks: Send + Sync + 'static {
 
 #[derive(Debug, Clone)]
 pub enum RuntimeOptions {
+    #[cfg(not(feature = "monoio"))]
     Tokio(tokio_runtime::RuntimeOptions),
     #[cfg(feature = "monoio")]
-    Monoio(monoio_runtime::RuntimeOptions)
+    Monoio(monoio_runtime::RuntimeOptions),
 }
 
 enum RuntimeState {
+    #[cfg(not(feature = "monoio"))]
     Tokio(tokio_runtime::RuntimeState),
     #[cfg(feature = "monoio")]
-    Monoio(monoio_runtime::RuntimeState)
+    Monoio(monoio_runtime::RuntimeState),
 }
 
 /// A callback function called when the associated client is dropped. See

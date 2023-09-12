@@ -6,6 +6,12 @@ use std::sync::{Arc, Mutex};
 
 use bytes::BytesMut;
 use thiserror::Error;
+
+#[cfg(not(feature = "monoio"))]
+use tokio as runtime;
+#[cfg(feature = "monoio")]
+use monoio as runtime;
+
 use tokio::sync::Notify;
 
 pub(crate) fn byte_channel(limit: usize) -> (ByteSender, ByteReceiver) {
@@ -232,11 +238,11 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[runtime::test]
     async fn byte_channel_async() {
         let (mut sender, mut receiver) = byte_channel(4);
 
-        let t = tokio::spawn(async move {
+        let t = runtime::spawn(async move {
             let bytes = receiver.recv_async().await.unwrap();
             assert_eq!(&bytes[..], b"hell");
             let bytes = receiver.recv_async().await.unwrap();
