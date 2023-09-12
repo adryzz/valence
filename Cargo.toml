@@ -105,6 +105,7 @@ approx = "0.5.1"
 arrayvec = "0.7.2"
 async-trait = "0.1.60"
 monoio = { version = "0.1.9", features = ["tokio-compat"] }
+monoio-compat = "0.1.2"
 atty = "0.2.14"
 base64 = "0.21.0"
 bevy_app = { version = "0.11", default-features = false }

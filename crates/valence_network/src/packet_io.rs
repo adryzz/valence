@@ -5,22 +5,25 @@ use std::{io, mem};
 
 use anyhow::bail;
 use bytes::BytesMut;
-
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-#[cfg(not(feature = "monoio"))]
-use tokio as runtime;
-
-#[cfg(feature = "monoio")]
-use {monoio as runtime, monoio::io::Splitable};
-
-use runtime::{net::TcpStream, task::JoinHandle};
-use tokio::{sync::Notify, sync::Semaphore};
-
+use runtime::net::TcpStream;
+use runtime::task::JoinHandle;
+use tokio::sync::{Notify, Semaphore};
 use tracing::{debug, warn};
 use valence_protocol::CompressionThreshold;
 use valence_server::client::{ClientBundleArgs, ClientConnection, ReceivedPacket};
 use valence_server::protocol::decode::PacketFrame;
 use valence_server::protocol::{Decode, Encode, Packet, PacketDecoder, PacketEncoder};
+#[cfg(feature = "monoio")]
+use {
+    monoio as runtime,
+    monoio::io::Splitable,
+    monoio_compat::{AsyncReadExt, AsyncWriteExt},
+};
+#[cfg(not(feature = "monoio"))]
+use {
+    tokio as runtime,
+    tokio::io::{AsyncReadExt, AsyncWriteExt},
+};
 
 use crate::byte_channel::{byte_channel, ByteSender, TrySendError};
 use crate::{CleanupOnDrop, NewClientInfo};

@@ -26,8 +26,6 @@ mod packet_io;
 #[cfg(not(feature = "monoio"))]
 pub mod tokio_runtime;
 
-use tokio::{runtime::Runtime, sync::Semaphore};
-
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -44,6 +42,8 @@ use rand::rngs::OsRng;
 use rsa::traits::PublicKeyParts;
 use rsa::RsaPrivateKey;
 use serde::Serialize;
+use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
 use tracing::error;
 use uuid::Uuid;
 use valence_protocol::text::IntoText;
@@ -89,20 +89,16 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
         // have tokio as the default runtime
         None => {
             let runtime = Runtime::new()?;
-            
+
             RuntimeState::Tokio(tokio_runtime::RuntimeState {
                 handle: runtime.handle().clone(),
                 runtime: Some(runtime),
             })
         }
         #[cfg(feature = "monoio")]
-        Some(RuntimeOptions::Monoio(_)) => {
-            todo!()
-        }
+        Some(RuntimeOptions::Monoio(_)) => RuntimeState::Monoio(monoio_runtime::RuntimeState {}),
         #[cfg(feature = "monoio")]
-        None => {
-            todo!()
-        }
+        None => RuntimeState::Monoio(monoio_runtime::RuntimeState {}),
     };
 
     let shared = SharedNetworkState(Arc::new(SharedNetworkStateInner {

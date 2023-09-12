@@ -5,13 +5,11 @@
 use std::sync::{Arc, Mutex};
 
 use bytes::BytesMut;
-use thiserror::Error;
-
-#[cfg(not(feature = "monoio"))]
-use tokio as runtime;
 #[cfg(feature = "monoio")]
 use monoio as runtime;
-
+use thiserror::Error;
+#[cfg(not(feature = "monoio"))]
+use tokio as runtime;
 use tokio::sync::Notify;
 
 pub(crate) fn byte_channel(limit: usize) -> (ByteSender, ByteReceiver) {
