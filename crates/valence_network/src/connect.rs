@@ -1,8 +1,6 @@
 //! Handles new connections to the server and the log-in process.
 
-use std::io;
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use anyhow::{bail, ensure, Context};
 use base64::prelude::*;
@@ -15,8 +13,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
-use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info, trace, warn};
+use tracing::info;
 use uuid::Uuid;
 use valence_lang::keys;
 use valence_protocol::profile::Property;
@@ -31,88 +28,13 @@ use valence_server::protocol::packets::login::{
 use valence_server::protocol::packets::status::{
     QueryPingC2s, QueryPongS2c, QueryRequestC2s, QueryResponseS2c,
 };
-use valence_server::protocol::{PacketDecoder, PacketEncoder, RawBytes, VarInt};
+use valence_server::protocol::{RawBytes, VarInt};
 use valence_server::text::{Color, IntoText};
 use valence_server::{ident, Text, MINECRAFT_VERSION, PROTOCOL_VERSION};
-
-use crate::legacy_ping::try_handle_legacy_ping;
 use crate::packet_io::PacketIo;
 use crate::{CleanupOnDrop, ConnectionMode, NewClientInfo, ServerListPing, SharedNetworkState};
 
-/// Accepts new connections to the server as they occur.
-pub(super) async fn do_accept_loop(shared: SharedNetworkState) {
-    let listener = match TcpListener::bind(shared.0.address).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            error!("failed to start TCP listener: {e}");
-            return;
-        }
-    };
 
-    let timeout = Duration::from_secs(5);
-
-    loop {
-        match shared.0.connection_sema.clone().acquire_owned().await {
-            Ok(permit) => match listener.accept().await {
-                Ok((stream, remote_addr)) => {
-                    let shared = shared.clone();
-
-                    tokio::spawn(async move {
-                        if let Err(e) = tokio::time::timeout(
-                            timeout,
-                            handle_connection(shared, stream, remote_addr),
-                        )
-                        .await
-                        {
-                            warn!("initial connection timed out: {e}");
-                        }
-
-                        drop(permit);
-                    });
-                }
-                Err(e) => {
-                    error!("failed to accept incoming connection: {e}");
-                }
-            },
-            // Closed semaphore indicates server shutdown.
-            Err(_) => return,
-        }
-    }
-}
-
-async fn handle_connection(
-    shared: SharedNetworkState,
-    mut stream: TcpStream,
-    remote_addr: SocketAddr,
-) {
-    trace!("handling connection");
-
-    if let Err(e) = stream.set_nodelay(true) {
-        error!("failed to set TCP_NODELAY: {e}");
-    }
-
-    match try_handle_legacy_ping(&shared, &mut stream, remote_addr).await {
-        Ok(true) => return, // Legacy ping succeeded.
-        Ok(false) => {}     // No legacy ping.
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {}
-        Err(e) => {
-            warn!("legacy ping ended with error: {e:#}");
-        }
-    }
-
-    let io = PacketIo::new(stream, PacketEncoder::new(), PacketDecoder::new());
-
-    if let Err(e) = handle_handshake(shared, io, remote_addr).await {
-        // EOF can happen if the client disconnects while joining, which isn't
-        // very erroneous.
-        if let Some(e) = e.downcast_ref::<io::Error>() {
-            if e.kind() == io::ErrorKind::UnexpectedEof {
-                return;
-            }
-        }
-        warn!("connection ended with error: {e:#}");
-    }
-}
 
 /// Basic information about a client, provided at the beginning of the
 /// connection
@@ -126,7 +48,7 @@ pub struct HandshakeData {
     pub server_port: u16,
 }
 
-async fn handle_handshake(
+pub(crate) async fn handle_handshake(
     shared: SharedNetworkState,
     mut io: PacketIo,
     remote_addr: SocketAddr,

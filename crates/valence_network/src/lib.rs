@@ -28,13 +28,10 @@ use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-
 use anyhow::Context;
 pub use async_trait::async_trait;
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use connect::do_accept_loop;
 pub use connect::HandshakeData;
 use flume::{Receiver, Sender};
 pub use legacy_ping::{ServerListLegacyPingPayload, ServerListLegacyPingResponse};
@@ -42,10 +39,8 @@ use rand::rngs::OsRng;
 use rsa::traits::PublicKeyParts;
 use rsa::RsaPrivateKey;
 use serde::Serialize;
-use tokio::net::UdpSocket;
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 use tokio::sync::Semaphore;
-use tokio::time;
 use tracing::error;
 use uuid::Uuid;
 use valence_protocol::text::IntoText;
@@ -687,32 +682,4 @@ pub struct PlayerSampleEntry {
     pub name: String,
     /// The player UUID.
     pub id: Uuid,
-}
-
-async fn do_broadcast_to_lan_loop(shared: SharedNetworkState) {
-    let port = shared.0.address.port();
-
-    let Ok(socket) = UdpSocket::bind("0.0.0.0:0").await else {
-        tracing::error!("Failed to bind to UDP socket for broadcast to LAN");
-        return;
-    };
-
-    loop {
-        let motd = match shared.0.callbacks.inner.broadcast_to_lan(&shared).await {
-            BroadcastToLan::Disabled => {
-                time::sleep(Duration::from_millis(1500)).await;
-                continue;
-            }
-            BroadcastToLan::Enabled(motd) => motd,
-        };
-
-        let message = format!("[MOTD]{motd}[/MOTD][AD]{port}[/AD]");
-
-        if let Err(e) = socket.send_to(message.as_bytes(), "224.0.2.60:4445").await {
-            tracing::warn!("Failed to send broadcast to LAN packet: {}", e);
-        }
-
-        // wait 1.5 seconds
-        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-    }
 }
