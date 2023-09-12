@@ -21,6 +21,8 @@ mod byte_channel;
 mod connect;
 mod legacy_ping;
 mod packet_io;
+pub mod tokio_runtime;
+pub mod monoio_runtime;
 
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -79,16 +81,25 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
         rsa_der::public_key_to_der(&rsa_key.n().to_bytes_be(), &rsa_key.e().to_bytes_be())
             .into_boxed_slice();
 
-    let runtime = if settings.tokio_handle.is_none() {
-        Some(Runtime::new()?)
-    } else {
-        None
-    };
-
-    let tokio_handle = match &runtime {
-        Some(rt) => rt.handle().clone(),
-        None => settings.tokio_handle.clone().unwrap(),
-    };
+        let runtime_state = match &settings.runtime_options {
+            Some(RuntimeOptions::Tokio(t)) => {
+                RuntimeState::Tokio(tokio_runtime::RuntimeState {
+                    runtime: None,
+                    handle: t.handle.clone()
+            })
+            },
+            Some(RuntimeOptions::Monoio(_)) => {
+                todo!()
+            },
+            // have tokio as the default runtime
+            None => {
+                let runtime = Runtime::new()?;
+                RuntimeState::Tokio(tokio_runtime::RuntimeState {
+                    handle: runtime.handle().clone(),
+                    runtime: Some(runtime),
+                })
+            },
+        };
 
     let shared = SharedNetworkState(Arc::new(SharedNetworkStateInner {
         callbacks: settings.callbacks.clone(),
@@ -102,8 +113,7 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
         max_players: settings.max_players,
         connection_mode: settings.connection_mode.clone(),
         threshold,
-        tokio_handle,
-        _tokio_runtime: runtime,
+        runtime_state,
         new_clients_send,
         new_clients_recv,
         rsa_key,
@@ -114,19 +124,32 @@ fn build_plugin(app: &mut App) -> anyhow::Result<()> {
     app.insert_resource(shared.clone());
 
     // System for starting the accept loop.
-    let start_accept_loop = move |shared: Res<SharedNetworkState>| {
-        let _guard = shared.0.tokio_handle.enter();
-
-        // Start accepting new connections.
-        tokio::spawn(do_accept_loop(shared.clone()));
+    let start_accept_loop = match shared.0.runtime_state {
+        RuntimeState::Tokio(_) => {
+            move |shared: Res<SharedNetworkState>| {
+                tokio_runtime::start_accept_loop(shared.clone())
+            }
+        }
+        RuntimeState::Monoio(_) => {
+            move |shared: Res<SharedNetworkState>| {
+                monoio_runtime::start_accept_loop(shared.clone())
+            }
+        }
     };
 
-    let start_broadcast_to_lan_loop = move |shared: Res<SharedNetworkState>| {
-        let _guard = shared.0.tokio_handle.enter();
-
-        tokio::spawn(do_broadcast_to_lan_loop(shared.clone()));
+    let start_broadcast_to_lan_loop = match shared.0.runtime_state {
+        RuntimeState::Tokio(_) => {
+            move |shared: Res<SharedNetworkState>| {
+                tokio_runtime::start_broadcast_to_lan_loop(shared.clone())
+            }
+        }
+        RuntimeState::Monoio(_) => {
+            move |shared: Res<SharedNetworkState>| {
+                monoio_runtime::start_broadcast_to_lan_loop(shared.clone())
+            }
+        }
     };
-
+    
     // System for spawning new clients.
     let spawn_new_clients = move |world: &mut World| {
         for _ in 0..shared.0.new_clients_recv.len() {
@@ -179,10 +202,7 @@ struct SharedNetworkStateInner {
     max_players: usize,
     connection_mode: ConnectionMode,
     threshold: CompressionThreshold,
-    tokio_handle: Handle,
-    // Holding a runtime handle is not enough to keep tokio working. We need
-    // to store the runtime here so we don't drop it.
-    _tokio_runtime: Option<Runtime>,
+    runtime_state: RuntimeState,
     /// Sender for new clients past the login stage.
     new_clients_send: Sender<ClientBundleArgs>,
     /// Receiver for new clients past the login stage.
@@ -216,13 +236,7 @@ pub struct NewClientInfo {
 #[derive(Resource, Clone)]
 pub struct NetworkSettings {
     pub callbacks: ErasedNetworkCallbacks,
-    /// The [`Handle`] to the tokio runtime the server will use. If `None` is
-    /// provided, the server will create its own tokio runtime at startup.
-    ///
-    /// # Default Value
-    ///
-    /// `None`
-    pub tokio_handle: Option<Handle>,
+    pub runtime_options: Option<RuntimeOptions>,
     /// The maximum number of simultaneous initial connections to the server.
     ///
     /// This only considers the connections _before_ the play state where the
@@ -280,7 +294,7 @@ impl Default for NetworkSettings {
     fn default() -> Self {
         Self {
             callbacks: ErasedNetworkCallbacks::default(),
-            tokio_handle: None,
+            runtime_options: None,
             max_connections: 1024,
             max_players: 20,
             address: SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 25565).into(),
@@ -505,6 +519,17 @@ pub trait NetworkCallbacks: Send + Sync + 'static {
             format!("https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={auth_digest}")
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum RuntimeOptions {
+    Tokio(tokio_runtime::RuntimeOptions),
+    Monoio(monoio_runtime::RuntimeOptions)
+}
+
+enum RuntimeState {
+    Tokio(tokio_runtime::RuntimeState),
+    Monoio(monoio_runtime::RuntimeState)
 }
 
 /// A callback function called when the associated client is dropped. See
