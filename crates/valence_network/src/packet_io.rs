@@ -17,7 +17,8 @@ use valence_server::protocol::{Decode, Encode, Packet, PacketDecoder, PacketEnco
 use {
     monoio as runtime,
     monoio::io::Splitable,
-    monoio_compat::{AsyncReadExt, AsyncWriteExt},
+    monoio_compat::AsyncReadExt,
+    monoio::io::AsyncWriteRentExt
 };
 #[cfg(not(feature = "monoio"))]
 use {
@@ -56,7 +57,12 @@ impl PacketIo {
     {
         self.enc.append_packet(pkt)?;
         let bytes = self.enc.take();
+
+        // monoio has an extra field
+        #[cfg(not(feature = "monoio"))]
         self.stream.write_all(&bytes).await?;
+        #[cfg(feature = "monoio")]
+        self.stream.write_all(bytes.freeze()).await.0?;
         Ok(())
     }
 
@@ -121,7 +127,13 @@ impl PacketIo {
                         // Incomplete packet. Need more data.
 
                         buf.reserve(READ_BUF_SIZE);
-                        match reader.read_buf(&mut buf).await {
+
+                        // monoio has an extra field for some reason
+                        #[cfg(not(feature = "monoio"))]
+                        let val = reader.read_buf(&mut buf).await;
+                        #[cfg(feature = "monoio")]
+                        let val = reader.read_buf(&mut buf).await.0;
+                        match val {
                             Ok(0) => break, // Reader is at EOF.
                             Ok(_) => {}
                             Err(e) => {
@@ -189,12 +201,15 @@ impl PacketIo {
                         break;
                     }
                 };
+                #[cfg(not(feature = "monoio"))]
+                let val = writer.write_all(&bytes).await;
+                #[cfg(feature = "monoio")]
+                let val = writer.write_all(bytes.freeze()).await.0;
 
-                if let Err(e) = writer.write_all(&bytes).await {
+                if let Err(e) = val {
                     debug!("error writing data to stream: {e}");
                 }
-            }
-        });
+            }});
 
         ClientBundleArgs {
             username: info.username,
@@ -258,8 +273,19 @@ impl ClientConnection for RealClientConnection {
 }
 
 impl Drop for RealClientConnection {
+    #[cfg(not(feature = "monoio"))]
     fn drop(&mut self) {
         self.writer_task.abort();
         self.reader_task.abort();
+    }
+
+    #[cfg(feature = "monoio")]
+    fn drop(&mut self) {
+        // as per monoio docs, dropping a future pushes an IO cancel to the io_uring if the future is dropped
+        // https://github.com/bytedance/monoio/blob/master/docs/en/configuration.md?plain=1#L67
+
+        // is this superfluous?
+        drop(self.writer_task);
+        drop(self.reader_task);
     }
 }
